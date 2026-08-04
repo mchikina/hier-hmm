@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hier-hmm"
+version = "0.1.0"
+description = "Hierarchical phase-type HMM for single-molecule methylation footprinting"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [{name = "Maria Chikina"}]
+keywords = ["hmm", "chromatin", "nucleosome", "footprint", "single-molecule", "fiber-seq"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "numpy>=1.21",
+  "pyyaml>=5.4",
+  "matplotlib>=3.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+hier-hmm = "hier_hmm.cli:main"
+
+[tool.setuptools]
+packages = ["hier_hmm"]
+
+[tool.setuptools.package-data]
+hier_hmm = ["default_config.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

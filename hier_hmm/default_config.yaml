@@ -1,0 +1,258 @@
+# =============================================================================
+# hier_hmm — default configuration
+# =============================================================================
+# This file is the single source of truth for every prior, duration, grammar
+# weight, threshold and bin size in the model. Nothing in the code carries a
+# second copy of these numbers: if a value is not here, the model does not use
+# it. A user config is deep-merged onto this file and any key that does not
+# already exist here is rejected, so a typo is an error rather than a silently
+# ignored setting.
+#
+# All lengths are in BASE PAIRS. The code converts them to bins internally
+# using the bin sizes below, so changing a bin size does not change what the
+# duration priors mean.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Binning
+# -----------------------------------------------------------------------------
+# Level 1 (open / linker / nucleosome) runs on bins of `level1_bp`; Level 2
+# (footprints, inside open runs only) runs on bins of `level2_bp`.
+#
+# A bin-size change is a MODEL change, not just a resolution change. Each state
+# is an Erlang chain of `k` stages, and `k` is fixed while the per-stage advance
+# probability scales with the bin size, so the dwell MEAN is invariant but the
+# dwell VARIANCE is not (a nucleosome's dwell SD is ~27 bp at 1 bp bins, ~21 bp
+# at 5 bp bins, ~10 bp at 10 bp bins). Re-tune `k` if you move these.
+binning:
+  level1_bp: 5      # a 147 bp nucleosome does not care about 5 bp quantisation
+  level2_bp: 1      # a 25 bp footprint does: at 5 bp bins each edge carries 20%
+
+
+# -----------------------------------------------------------------------------
+# Level 1 — open / linker / nucleosome
+# -----------------------------------------------------------------------------
+# Each state is a phase-type (Erlang) duration: `k` stages each left with the
+# same probability, giving a peaked, non-geometric dwell distribution with
+# mean `mean_bp` and SD ~ mean_bp / sqrt(k). `min_bp`, if given, is a hard
+# advance-only prefix: the state cannot be shorter than that, and the Erlang
+# tail then adds a further mean of (mean_bp - min_bp).
+#
+# `emission_class` names the methylation rate this state emits with (see the
+# `emission` section). open and linker SHARE the `accessible` class by default:
+# they are separated by their duration priors and by the grammar, not by the
+# signal. Untying them (set linker's class to `linker`) measures a real-looking
+# difference (~0.73 vs ~0.57) but is strictly dominated in practice — the lower
+# linker rate is an artefact of linkers being SHORT (edge blur), not of being
+# less accessible, and untying feeds that artefact back through calibration in
+# a self-confirming loop.
+level1:
+  states:
+    open:
+      mean_bp: 212.0
+      k: 4
+      emission_class: accessible
+    linker:
+      mean_bp: 49.0
+      k: 3
+      emission_class: accessible     # set to `linker` to untie (not recommended)
+    nucleosome:
+      mean_bp: 129.0
+      k: 6
+      min_bp: 60.0                   # hard floor on nucleosome dwell
+      emission_class: protected
+
+  # Grammar: allowed transitions out of each state and their weights (each row
+  # is renormalised to 1). Zeros are HARD — open -> nucleosome and
+  # linker -> nucleosome are the only exits from those states, and a nucleosome
+  # is followed by a linker 72% of the time and by an open run 28%. This is
+  # what makes "open" and "linker" different objects rather than two names for
+  # the same accessible state.
+  transitions:
+    open:       {nucleosome: 1.0}
+    linker:     {nucleosome: 1.0}
+    nucleosome: {linker: 0.72, open: 0.28}
+
+  # Where the chain starts. `uniform` = "enter at any dwell stage of any state",
+  # which is correct when a fiber's left edge is an arbitrary read start.
+  # Naming a state instead (e.g. `open`) is correct only when every window is
+  # centred on a feature that is open by construction; on read-start data it
+  # puts a spurious open/footprint stripe at the start of every fiber.
+  start: uniform
+
+  # Decoding. `posterior` = forward-backward, then a bin is called `open` when
+  # P(open) >= tau and otherwise takes the argmax of the remaining states.
+  # `viterbi` = single best path, one fixed operating point with no tau.
+  # tau is the knob that turns the caller into a recall curve.
+  decode: posterior
+  threshold_state: open
+  tau: 0.5
+
+
+# -----------------------------------------------------------------------------
+# Level 2 — footprints, nested inside Level-1 open runs
+# -----------------------------------------------------------------------------
+# Runs at `binning.level2_bp` resolution on the interior of each open run: the
+# first and last `margin_bp` of the run are excluded (the open/nucleosome
+# boundary is blurred and produced edge "footprints"), and runs shorter than
+# `min_open_run_bp` are skipped entirely.
+level2:
+  states:
+    open:
+      mean_bp: 50.0        # mean open bp before a footprint starts (1 / hazard)
+      k: 1
+      emission_class: open_only
+    footprint:
+      mean_bp: 15.0
+      k: 3
+      min_bp: 8.0          # hard floor on the hidden footprint dwell
+      emission_class: footprint
+
+  transitions:
+    open:      {footprint: 1.0}
+    footprint: {open: 1.0}
+
+  start: open
+
+  # `posterior` decoding scored better than viterbi on positional concentration
+  # of the calls (viterbi's calls were LESS concentrated than a permutation
+  # null's, i.e. its excess was negative).
+  decode: posterior
+  threshold_state: footprint
+  tau: 0.5
+
+  background_state: open      # the non-call state of this chain
+  call_state: footprint       # the state written into the output labels
+  applies_within: open        # the Level-1 state whose runs Level 2 searches
+
+  margin_bp: 15.0             # trimmed from each end of an open run
+  min_open_run_bp: 60.0       # open runs shorter than this are not searched
+
+  # Hard minimum length of a DECODED call, applied after thresholding.
+  # `states.footprint.min_bp` constrains the hidden dwell, but thresholding the
+  # posterior clips the tapering edges, so decoded runs come out shorter than
+  # the state that generated them. Without this floor ~8-10% of calls land
+  # under 8 bp, which is not defensible as a TF footprint. The floor costs some
+  # cross-fiber coherence but nearly doubles positional concentration, and
+  # concentration is the density-invariant metric of the two.
+  min_call_bp: 8.0
+
+
+# -----------------------------------------------------------------------------
+# Emission
+# -----------------------------------------------------------------------------
+# Masked BINOMIAL on (methylated, callable) counts per bin:
+#     log P(bin | class) = k log(mu) + (n - k) log(1 - mu)
+# Evidence scales with the NUMBER of callable positions in the bin, which is
+# the point: a 5 bp bin with one callable site and no methylation is 5x weaker
+# evidence than one with five. A bin with no callable sites contributes 0 to
+# every state — it is simply uninformative and the duration prior carries it.
+# (A Gaussian on a smoothed methylation RATE scores those two bins identically
+# and lets callable-site density bias the state calls.)
+emission:
+  # One methylation rate per class. `pool` lists which decoded states the rate
+  # is re-estimated from during calibration; a class may pool several states,
+  # and several states may share a class.
+  classes:
+    accessible:            # Level-1 accessible rate
+      pool: [open, linker, footprint]
+      init: high
+    protected:             # nucleosome
+      pool: [nucleosome]
+      init: low
+    open_only:             # Level-2 background: open bins only, no linker
+      pool: [open]
+      init: high
+    footprint:
+      pool: [footprint]
+      init: low
+      # Ceiling: this class's rate may not exceed the named class's rate.
+      # `open_only` is a weak guard (a footprint cannot be MORE accessible than
+      # the open background it sits in) and is essentially never binding.
+      # Setting it to `protected` instead would impose the stronger claim that a
+      # TF footprint is at least as occluded as nucleosomal DNA. That is left
+      # off because the data contradicts it — the measured rate inside called
+      # footprints is roughly 0.045 against 0.026 for nucleosome — and turning
+      # it on silently re-ties the two rates, which is the thing untying them
+      # set out to undo. Use null for no ceiling at all.
+      clamp_to: open_only
+
+  calibration:
+    # Initialisation: a 2-component binomial mixture EM on the pooled per-bin
+    # (methylated, callable) counts gives a `high` and a `low` rate, which seed
+    # the classes according to their `init` field above. A class may instead
+    # give a number for `init` to fix its starting value.
+    # The mixture is on COUNTS, not on a ratio: a 5 bp bin holds ~2-3 callable
+    # sites, so protected bins are usually exactly 0 methylated, and a Gaussian
+    # mixture on the rate parks the protected component at mu=0 with a sigma as
+    # wide as the whole dynamic range.
+    mixture_init: true
+    mixture_start: [0.60, 0.05]
+    mixture_iters: 200
+    mixture_tol: 1.0e-8
+
+    # Then refine FROM THE SEGMENTATION: annotate every fiber with the current
+    # rates, re-estimate each class from the positions it was assigned, repeat.
+    # 0 = use the mixture rates as-is.
+    refine_iters: 2
+
+    # Floor/ceiling applied to every rate (keeps logs finite).
+    clip: [1.0e-4, 0.9999]
+
+
+# -----------------------------------------------------------------------------
+# Data / fiber acceptance
+# -----------------------------------------------------------------------------
+# Input is a single (n_fiber, n_pos) float array:
+#     NaN = not callable here (not covered by this read, or not an assayable
+#           base), 0 = callable and unmethylated, 1 = callable and methylated.
+# Values are thresholded at `meth_threshold`, so soft probabilities are allowed
+# but are binarised — the emission is Bernoulli, not a soft count.
+data:
+  meth_threshold: 0.5
+  min_bins_per_fiber: 20     # fibers with fewer usable Level-1 bins are dropped
+  min_callable_per_bin: 1    # a bin needs this many callable sites to anchor
+                             # the fiber's covered span (interior bins may have
+                             # fewer; they are simply uninformative)
+  # If the input npz also carries a boolean `coverage` array (read coverage,
+  # separate from callability), a bin only anchors the span when at least this
+  # fraction of it is covered. Partially covered end bins otherwise produce
+  # read-end `open` and `footprint` artefacts. Ignored when no coverage array
+  # is supplied.
+  full_coverage_frac: 0.999
+
+
+# -----------------------------------------------------------------------------
+# Output
+# -----------------------------------------------------------------------------
+output:
+  save_posterior: true       # per-bp Level-2 call posterior, NaN where not searched
+  save_config: true          # dump the fully resolved config next to the results
+
+
+# -----------------------------------------------------------------------------
+# Plotting
+# -----------------------------------------------------------------------------
+plot:
+  enabled: true
+  figsize: [15.0, 12.5]
+  dpi: 130
+  # Aggregate profile: fraction of covering fibers called `open` or `footprint`.
+  # A position is only plotted when at least this many fibers cover it — at the
+  # edges of a window only a handful of reads reach, and their aggregate is
+  # noise that shows up as tall spikes.
+  profile_states: [open, footprint]
+  min_coverage: 5
+  # Row order: any per-fiber key present in the input npz, plus the derived
+  # `open_frac`, or `none` to keep input order.
+  order_by: open_frac
+  colors:
+    open:       "#ffeda0"
+    linker:     "#9ecae1"
+    nucleosome: "#525252"
+    footprint:  "#e31a1c"
+    nodata:     "#ffffff"
+  # Colours for the group sidebar, by group value. Values not listed here fall
+  # back to a tab10 cycle.
+  group_colors: {}
