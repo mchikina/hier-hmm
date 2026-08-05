@@ -186,7 +186,7 @@ emission:
       # (it is the estimate that looks least self-supporting, since each pass
       # re-estimates it from the calls the previous pass made) and the T-cell
       # measurement says not to: it settles by pass 2 and pinning it earlier
-      # costs excess_top (+0.0774 at pass 1 vs +0.0792 at pass 2). See
+      # costs excess_top (+0.0750 at pass 1 vs +0.0760 at pass 2). See
       # `calibration.refine_iters`.
       max_refine: null
       # Ceiling: this class's rate may not exceed the named class's rate.
@@ -224,24 +224,23 @@ emission:
     # 4 nulls; see `hier_hmm.metrics`, README and examples/refine_sweep.py):
     #
     #   k     0        1        2        3        4        5
-    #   top  -0.0174  +0.0551  +0.0792  +0.0639  +0.0600  +0.0613
-    #   coh  +0.0585  +0.0542  +0.0538  +0.0511  +0.0502  +0.0505
+    #   top  -0.0004  +0.0591  +0.0760  +0.0623  +0.0682  +0.0565
+    #   coh  +0.0562  +0.0544  +0.0530  +0.0502  +0.0500  +0.0491
     #
-    # Without refinement the calls are LESS positionally concentrated than the
-    # null (negative excess_top, and -0.13 / -0.18 at two of the three loci):
+    # Without refinement the calls are placed no better than chance (excess_top
+    # ~ 0, and utterly inconsistent between loci: +0.115 / -0.110 / -0.005) --
     # the mixture rates alone do not produce footprints that agree across
-    # molecules. k=1 loses to k=2 by +0.024 at all 3 loci. Beyond k=2 the curve
-    # is a slow decay of about 0.015-0.019 -- consistent in sign (3/3 loci) but
-    # small next to the spread between groups (SEM ~0.021), and it comes
-    # entirely from one cell type: Tconv peaks sharply at k=2 (0.081 vs 0.052 at
-    # k=3) while Treg is flat from k=2 to k=5 (0.077 / 0.076 / 0.073 / 0.072).
-    # So treat 3 as an acceptable alternative and 0-1 as wrong.
+    # molecules. k=2 beats every other k at all 3 loci, and all 3 peak there,
+    # but the margins past k=2 are small: +0.014 over k=3 and +0.008 over k=4,
+    # against a between-locus SEM of ~0.027. So treat 3 as an acceptable
+    # alternative and 0-1 as wrong.
     #
-    # What decays past k=2 is the accessible and protected rates still sliding
+    # What drifts past k=2 is the accessible and protected rates still sliding
     # (0.63 -> 0.58 and 0.038 -> 0.026 by pass 5). The FOOTPRINT rate is not the
-    # culprit: it settles by pass 2, and holding it fixed at any later pass
-    # changes excess_top by less than 0.001. Use per-class `max_refine` if you
-    # want to raise this and pin some class in place.
+    # culprit: holding the Level-1 classes at k=2 and taking only the footprint
+    # rate from pass k gives +0.061 / +0.075 / +0.076 / +0.077 / +0.077 / +0.076
+    # -- flat from pass 2 on. Use per-class `max_refine` if you want to raise
+    # this and pin some class in place.
     refine_iters: 2
 
     # Floor/ceiling applied to every rate (keeps logs finite).

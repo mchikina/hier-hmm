@@ -64,28 +64,24 @@ def median_call_length(rows: np.ndarray) -> float:
 
 # ---------------------------------------------------------------- the null
 def permute_in_runs(fiber, lab1: np.ndarray, model, rng: np.random.Generator) -> np.ndarray:
-    """Re-place a fiber's methylated positions within each Level-1 open run.
+    """Re-place a fiber's methylated positions within each searched interval.
 
-    Count-preserving per run, so the null has the same amount of methylation in
-    the same places at run resolution, and differs only in WHERE inside a run.
+    The intervals come from `model.search_intervals`, i.e. exactly the stretches
+    Level 2 decodes — the interiors of open runs, margins already trimmed. That
+    matters: permuting over the whole open run instead would let methylation
+    cross the margin boundary, so the null would differ from the observation not
+    only in WHERE methylation sits inside the searched region but in HOW MUCH is
+    there at all (about 1.4% less, measured on T-cell data). Confining the
+    permutation to the searched interval makes the count identical by
+    construction, and the null then differs only in arrangement.
     """
-    within = model.labels[model.within]
     out = fiber.meth_bp.copy()
-    i, n1 = 0, len(lab1)
-    while i < n1:
-        if lab1[i] != within:
-            i += 1
-            continue
-        j = i
-        while j < n1 and lab1[j] == within:
-            j += 1
-        a, z = i * model.bin1, j * model.bin1
+    for a, z in model.search_intervals(lab1):
         idx = np.flatnonzero(fiber.call_bp[a:z])
         n_meth = int(fiber.meth_bp[a:z].sum())
         if len(idx) >= 2 and n_meth > 0:
             out[a:z] = False
             out[a + rng.choice(idx, size=min(n_meth, len(idx)), replace=False)] = True
-        i = j
     return out
 
 

@@ -28,6 +28,9 @@ def cmd_run(a) -> int:
     ds = load_npz(a.input, cfg)
     if not a.quiet:
         print(f"{a.input}: {ds.n_pos} positions, {len(ds.fibers)} fibers kept")
+        if ds.dropped_bp:
+            print(f"  note: {ds.dropped_bp} trailing position(s) dropped — the window is "
+                  f"not a whole number of {ds.bin_bp} bp bins")
     result = run(ds, cfg, verbose=not a.quiet)
     paths = save(result, a.outdir, a.prefix)
     if not a.quiet:

@@ -15,7 +15,10 @@ from .model import NODATA, HierHMM
 @dataclass
 class Result:
     labels: np.ndarray                 # (n_fiber, n_bp) int8, NODATA outside the span
-    posterior: np.ndarray              # (n_fiber, n_bp) float32, NaN where not searched
+    posterior: np.ndarray              # (n_fiber, n_bp) float32 Level-2 call posterior;
+                                       #   NaN where Level 2 did not search, and NaN
+                                       #   everywhere under Viterbi decoding, which
+                                       #   produces a path and not a posterior
     label_map: dict                    # state name -> integer label
     rates: dict                        # emission class -> methylation rate
     calibration: dict                  # full calibration report
@@ -65,7 +68,12 @@ def run(dataset, cfg: dict, verbose: bool = True) -> Result:
 
     meta = {k: np.array([f.meta[k] for f in dataset.fibers]) for k in dataset.meta}
     meta["fiber_index"] = np.array([f.index for f in dataset.fibers])
-    want = [model.labels[s] for s in cfg["plot"]["profile_states"]]
+    # "open" here means the Level-1 state Level 2 searches inside, plus Level 2's
+    # own call state — a footprint sits in accessible DNA, so counting it as
+    # closed would make a heavily footprinted molecule look compact. Defined from
+    # the model, not from `plot.profile_states`: this drives fiber ordering and
+    # is written to the output, so it must not depend on plotting settings.
+    want = [model.labels[model.within], model.labels[model.call_state]]
     meta["open_frac"] = np.array([
         float(np.isin(L[i][L[i] != NODATA], want).mean()) for i in range(len(L))])
 

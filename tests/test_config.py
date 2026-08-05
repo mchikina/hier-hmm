@@ -69,6 +69,13 @@ def test_validation_catches_bad_references():
         ("level1.decode=maybe", "must be 'posterior' or 'viterbi'"),
         ("level1.states.nucleosome.min_bp=200", "must be less"),
         ("plot.profile_states=[banana]", "unknown state"),
+        # tau is compared against a posterior; out of [0, 1] it silently turns
+        # the threshold state off or on everywhere instead of erroring
+        ("level1.tau=1.5", "must be in [0, 1]"),
+        ("level2.tau=-0.1", "must be in [0, 1]"),
+        # a state must pin its length distribution xor its substate count
+        ("level1.states.open.k=4", "exactly one of sd_bp"),
+        ("level1.states.nucleosome.sd_bp=null", "exactly one of sd_bp"),
     ]:
         try:
             load_config(None, [override])

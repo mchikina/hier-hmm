@@ -10,7 +10,9 @@ SMAC / dSMF style m6A calls) into chromatin states, one molecule at a time.
 ![quickstart output](docs/quickstart.png)
 
 Each row is a molecule: grey nucleosome, pale blue linker, yellow open, red footprint, white
-where the read has no data. Top panel is the fraction of covering molecules called open.
+where the read has no data. Top panel is the fraction of covering molecules called open **or
+footprint** — a footprint sits in accessible DNA, so it counts as open here (the same convention
+as the per-molecule `open_frac` in the output).
 
 ## States and substates
 
@@ -81,6 +83,9 @@ used only to find each molecule's usable span), `positions` and `center` for the
 **any length-`n_fiber` array** (groups, cluster ids, read names), which rides through to the
 output and can split the plot or order its rows.
 
+`n_pos` is truncated to a whole number of Level-1 bins, so up to `level1_bp - 1` trailing
+positions are dropped; the count is reported on the console and as `Dataset.dropped_bp`.
+
 ## Use
 
 ```bash
@@ -126,21 +131,29 @@ the argmax of the rest. `tau` is the operating point — sweep it for a recall c
 ### Why calibration runs twice
 
 `hier_hmm.metrics` scores Level-2 calls as excess over a permutation null: Level 1 frozen, each
-molecule's methylated positions re-placed within its own open runs, null called with the same
-rates. On three T-cell loci, positional concentration of the footprint calls against the number
-of calibration passes:
+molecule's methylated positions re-placed at random within the intervals Level 2 actually
+searches, null called with the same rates. On three T-cell loci, positional concentration of the
+footprint calls against the number of calibration passes:
 
 | pass `k` | 0 | 1 | **2** | 3 | 4 | 5 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `excess_top` | −0.017 | +0.055 | **+0.079** | +0.064 | +0.060 | +0.061 |
+| `excess_top` | −0.000 | +0.059 | **+0.076** | +0.062 | +0.068 | +0.057 |
+| calls / molecule (obs / null) | 2.5 / 1.0 | 3.7 / 2.1 | 4.4 / 2.6 | 4.8 / 2.9 | 4.8 / 3.0 | 4.8 / 3.0 |
 
 ![refinement sweep](docs/refine_sweep.png)
 
-Unrefined rates give calls *less* concentrated than the null. `k=2` is the best value and all
-three loci agree on it, but the margin over `k=3` is ~0.015 against a between-locus spread of
-~0.021 — so read this as "at least 2", with 3 an acceptable alternative. The footprint rate
-itself settles by pass 2; what keeps drifting afterwards is `accessible` and `protected`. Run
-`examples/refine_sweep.py` on your own windows to redo this.
+Unrefined rates give calls no better placed than chance (−0.0004 on average, and wildly
+inconsistent between loci: +0.115 / −0.110 / −0.005). `k=2` is the best value, and all three
+loci agree on it and prefer it to every other `k` — but the margins past `k=2` are small
+(+0.014 over `k=3`, +0.008 over `k=4`) against a between-locus spread of ~0.027. Read it as "at
+least 2", with 3 an acceptable alternative.
+
+Varying only the footprint rate, with the Level-1 classes held at `k=2`, gives +0.061 / +0.075 /
+**+0.076** / +0.077 / +0.077 / +0.076 — flat from pass 2 on. So the footprint rate is not what
+the curve above is responding to after `k=2`; `accessible` and `protected` are still drifting
+(0.63 → 0.58 and 0.038 → 0.026) and concordance drifts with them.
+
+Run `examples/refine_sweep.py` on your own windows to redo all of this.
 
 ## Tests
 
@@ -148,7 +161,7 @@ itself settles by pass 2; what keeps drifting afterwards is `accessible` and `pr
 pytest                # or: python tests/test_hmm.py  — each file also runs standalone
 ```
 
-34 tests: length distributions against what the config asked for, Viterbi and forward-backward
+36 tests: length distributions against what the config asked for, Viterbi and forward-backward
 against brute-force enumeration of every path on small chains, config validation, end-to-end
 recovery of a simulated path, and the concordance metrics.
 

@@ -70,6 +70,45 @@ def test_no_planted_signal_scores_near_zero():
     assert abs(r["excess_coh"]) < 0.03, r
 
 
+def test_null_preserves_the_count_in_the_searched_interval():
+    """The null must differ from the observation only in ARRANGEMENT.
+
+    Permuting over the whole open run instead of the searched interior would let
+    methylation cross the margin boundary, so the null would carry a different
+    AMOUNT of methylation where Level 2 actually looks (1.4% less, measured on
+    T-cell data) — a null that differs in density, not only in arrangement.
+    """
+    cfg = load_config()
+    d = simulate(cfg, n_fiber=20, n_pos=3000, seed=9)
+    ds = prepare(d["m6a"], cfg)
+    model = HierHMM(cfg)
+    rates, _ = calibrate(model, ds, verbose=False)
+    rng = np.random.default_rng(0)
+    checked = 0
+    for f in ds.fibers:
+        lab1 = model.level1(f, rates)
+        perm = permute_in_runs(f, lab1, model, rng)
+        touched = np.zeros(len(f.meth_bp), bool)
+        for a, z in model.search_intervals(lab1):
+            assert perm[a:z].sum() == f.meth_bp[a:z].sum(), (a, z)
+            assert not (perm[a:z] & ~f.call_bp[a:z]).any()
+            touched[a:z] = True
+            checked += 1
+        # nothing outside a searched interval may move at all
+        assert np.array_equal(perm[~touched], f.meth_bp[~touched])
+    assert checked > 0, "no searched intervals to test"
+
+
+def test_viterbi_reports_no_posterior_rather_than_zeros():
+    cfg = load_config(None, ["level2.decode=viterbi"])
+    d = simulate(cfg, n_fiber=10, n_pos=2000, seed=10)
+    ds = prepare(d["m6a"], cfg)
+    model = HierHMM(cfg)
+    rates, _ = calibrate(model, ds, verbose=False)
+    _, post = model.annotate(ds.fibers[0], rates, want_post=True)
+    assert np.isnan(post).all(), "Viterbi has no posterior; it must not report zeros"
+
+
 def test_max_refine_freezes_a_class():
     cfg = load_config(None, ["emission.calibration.refine_iters=3",
                              "emission.classes.footprint.max_refine=1"])

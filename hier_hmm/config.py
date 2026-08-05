@@ -150,6 +150,12 @@ def validate(cfg: dict) -> dict:
             raise ValueError(f"{level}.decode must be 'posterior' or 'viterbi'")
         if lv["threshold_state"] not in states:
             raise ValueError(f"{level}.threshold_state must be one of {list(states)}")
+        # tau is compared directly against a posterior probability, so a value
+        # outside [0, 1] does not error anywhere — it silently turns the
+        # threshold state off (tau > 1) or on everywhere (tau < 0).
+        if not 0.0 <= lv["tau"] <= 1.0:
+            raise ValueError(f"{level}.tau is a posterior probability threshold and must be "
+                             f"in [0, 1], got {lv['tau']}")
 
     l2 = cfg["level2"]
     for field in ("background_state", "call_state"):

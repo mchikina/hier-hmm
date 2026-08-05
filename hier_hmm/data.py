@@ -18,6 +18,10 @@ An `.npz` may also carry, all optional:
     <anything else of length n_fiber> is carried through as per-fiber metadata
                (group labels, cluster ids, read names, ...) and is available to
                `plot.order_by` and written back into the output.
+
+`n_pos` is truncated to a whole number of Level-1 bins: every output array is
+`n_bins * level1_bp` long, so up to `level1_bp - 1` trailing positions are
+dropped. The count is reported as `Dataset.dropped_bp` and printed by the CLI.
 """
 from __future__ import annotations
 
@@ -56,6 +60,7 @@ class Dataset:
     bin_bp: int
     coords: np.ndarray                # per-bp x coordinate for plotting
     coord_label: str = "position (bp)"
+    dropped_bp: int = 0               # tail positions lost to whole-bin truncation
     meta: dict = field(default_factory=dict)      # per-fiber arrays, full length
     extras: dict = field(default_factory=dict)    # positions / center / etc.
 
@@ -75,6 +80,10 @@ def prepare(m6a: np.ndarray, cfg: dict, coverage: np.ndarray | None = None,
     n_bins = n_pos // bin_bp
     if n_bins < 1:
         raise ValueError(f"n_pos={n_pos} is shorter than one bin ({bin_bp} bp)")
+    # A window that is not a whole number of Level-1 bins loses its tail: every
+    # output array is n_bins * bin_bp long. Usually 1-4 bp and harmless, but it
+    # is silent, so record it and let the caller say so.
+    dropped = n_pos - n_bins * bin_bp
 
     dcfg = cfg["data"]
     thr = float(dcfg["meth_threshold"])
@@ -125,7 +134,8 @@ def prepare(m6a: np.ndarray, cfg: dict, coverage: np.ndarray | None = None,
         coords = np.arange(n_bins * bin_bp, dtype=float)
         label = "position in window (bp)"
     return Dataset(fibers=fibers, n_pos=n_pos, n_bins=n_bins, bin_bp=bin_bp,
-                   coords=coords, coord_label=label, meta=dict(meta or {}), extras=extras)
+                   coords=coords, coord_label=label, dropped_bp=dropped,
+                   meta=dict(meta or {}), extras=extras)
 
 
 def load_npz(path: str, cfg: dict) -> Dataset:

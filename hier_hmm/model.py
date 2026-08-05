@@ -68,9 +68,9 @@ class HierHMM:
         ch = level.chain
         if level.decode == "viterbi":
             path = hmm.viterbi(log_E, ch.log_T, ch.log_start)
-            macro = ch.macro[path]
-            post = np.zeros(len(k)) if want_post else None
-            return macro, post
+            # Viterbi gives a path, not a posterior. Return None rather than a
+            # column of zeros, which a caller cannot tell from genuine zeros.
+            return ch.macro[path], None
         pm = hmm.macro_posteriors(log_E, ch.log_T, ch.log_start,
                                   ch.macro, len(ch.macro_names))
         # argmax over the non-threshold states, then let the threshold state
@@ -90,18 +90,17 @@ class HierHMM:
         return lut[macro]
 
     # ------------------------------------------------------------------ level 2
-    def level2(self, fiber, lab1: np.ndarray, rates: np.ndarray):
-        """Overlay call-state runs on a Level-1 labelling, at `level2_bp`.
+    def search_intervals(self, lab1: np.ndarray):
+        """[(start_bp, end_bp)] that Level 2 actually searches, given a Level-1
+        labelling: the interiors of long enough `applies_within` runs, with
+        `margin_bp` trimmed from each end.
 
-        Returns (bp labels, bp posterior); the posterior is NaN outside the
-        interiors that were actually searched.
+        Anything that has to reason about "where Level 2 looked" — the caller
+        itself, and the permutation null in `metrics` — goes through here, so the
+        two cannot drift apart.
         """
-        lab = np.repeat(lab1, self.bin1).astype(np.int8)
-        prob = np.full(len(lab), np.nan)
+        out = []
         within = self.labels[self.within]
-        call_lab = self.labels[self.call_state]
-        b = self.bin2
-        min_call_bins = int(round(self.min_call / b))
         i, n1 = 0, len(lab1)
         while i < n1:
             if lab1[i] != within:
@@ -112,16 +111,33 @@ class HierHMM:
                 j += 1
             a = int(i * self.bin1 + self.margin)
             z = int(j * self.bin1 - self.margin)
-            if (j - i) * self.bin1 >= self.min_open_run and z - a >= 2 * b:
-                k = _rebin(fiber.meth_bp[a:z], b)
-                nn = _rebin(fiber.call_bp[a:z], b)
-                macro, post = self._decode(self.l2, k, nn, rates, want_post=True)
-                hit = macro == self.l2.chain.macro_names.index(self.call_state)
-                hit = _drop_short(hit, min_call_bins)
-                m = len(k) * b
-                lab[a:a + m][np.repeat(hit, b)] = call_lab
-                prob[a:a + m] = np.repeat(post, b)
+            if (j - i) * self.bin1 >= self.min_open_run and z - a >= 2 * self.bin2:
+                out.append((a, z))
             i = j
+        return out
+
+    def level2(self, fiber, lab1: np.ndarray, rates: np.ndarray):
+        """Overlay call-state runs on a Level-1 labelling, at `level2_bp`.
+
+        Returns (bp labels, bp posterior); the posterior is NaN outside the
+        interiors that were actually searched, and NaN everywhere under Viterbi
+        decoding, which produces a path rather than a posterior.
+        """
+        lab = np.repeat(lab1, self.bin1).astype(np.int8)
+        prob = np.full(len(lab), np.nan)
+        call_lab = self.labels[self.call_state]
+        b = self.bin2
+        min_call_bins = int(round(self.min_call / b))
+        for a, z in self.search_intervals(lab1):
+            k = _rebin(fiber.meth_bp[a:z], b)
+            nn = _rebin(fiber.call_bp[a:z], b)
+            macro, post = self._decode(self.l2, k, nn, rates, want_post=True)
+            hit = macro == self.l2.chain.macro_names.index(self.call_state)
+            hit = _drop_short(hit, min_call_bins)
+            m = len(k) * b
+            lab[a:a + m][np.repeat(hit, b)] = call_lab
+            if post is not None:
+                prob[a:a + m] = np.repeat(post, b)
         return lab, prob
 
     def annotate(self, fiber, rates: np.ndarray, want_post: bool = False):
