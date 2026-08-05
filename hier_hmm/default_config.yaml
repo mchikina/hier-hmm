@@ -205,22 +205,30 @@ emission:
     # rates, re-estimate each class from the positions it was assigned, repeat.
     # 0 = use the mixture rates as-is.
     #
-    # 2 is measured, not guessed. Scoring the Level-2 calls on T-cell data as
-    # excess over a permutation null (3 loci x 2 cell types, 4 nulls; see
-    # `hier_hmm.metrics` and README):
+    # 2 is measured, not guessed, but the measurement supports "at least 2" far
+    # more strongly than it supports "exactly 2". Scoring the Level-2 calls on
+    # T-cell data as excess over a permutation null (3 loci x 2 cell types,
+    # 4 nulls; see `hier_hmm.metrics`, README and examples/refine_sweep.py):
     #
     #   k     0        1        2        3        4        5
     #   top  -0.0174  +0.0551  +0.0792  +0.0639  +0.0600  +0.0613
     #   coh  +0.0585  +0.0542  +0.0538  +0.0511  +0.0502  +0.0505
     #
     # Without refinement the calls are LESS positionally concentrated than the
-    # null (negative excess_top) — the mixture rates alone do not produce
-    # footprints that agree across molecules. Two passes is the peak. Past that
-    # the accessible and protected rates keep sliding (0.63 -> 0.58 and
-    # 0.038 -> 0.026 by pass 5) and concordance slowly decays with them; the
-    # FOOTPRINT rate is not the culprit, it settles by pass 2 and holding it
-    # fixed at any later pass changes excess_top by <0.001. Use per-class
-    # `max_refine` if you want to raise this and pin some class in place.
+    # null (negative excess_top, and -0.13 / -0.18 at two of the three loci):
+    # the mixture rates alone do not produce footprints that agree across
+    # molecules. k=1 loses to k=2 by +0.024 at all 3 loci. Beyond k=2 the curve
+    # is a slow decay of about 0.015-0.019 -- consistent in sign (3/3 loci) but
+    # small next to the spread between groups (SEM ~0.021), and it comes
+    # entirely from one cell type: Tconv peaks sharply at k=2 (0.081 vs 0.052 at
+    # k=3) while Treg is flat from k=2 to k=5 (0.077 / 0.076 / 0.073 / 0.072).
+    # So treat 3 as an acceptable alternative and 0-1 as wrong.
+    #
+    # What decays past k=2 is the accessible and protected rates still sliding
+    # (0.63 -> 0.58 and 0.038 -> 0.026 by pass 5). The FOOTPRINT rate is not the
+    # culprit: it settles by pass 2, and holding it fixed at any later pass
+    # changes excess_top by less than 0.001. Use per-class `max_refine` if you
+    # want to raise this and pin some class in place.
     refine_iters: 2
 
     # Floor/ceiling applied to every rate (keeps logs finite).

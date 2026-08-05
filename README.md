@@ -29,6 +29,27 @@ pip install -e .            # numpy, pyyaml, matplotlib
 pip install -e ".[test]"    # + pytest
 ```
 
+Nothing else is required — no scipy, no scikit-learn, no BAM reader. Without installing, every
+entry point still works from the repo root as `python -m hier_hmm ...`.
+
+## Try it with no data
+
+```bash
+python examples/quickstart.py            # simulate a locus, annotate it, score the annotation
+```
+
+This generates molecules from the model's own priors (a shared accessible core, footprints on
+some of them, ragged read ends), runs the annotator, prints agreement against the known truth
+and writes the standard figure. It is the fastest way to see the input format, the outputs and
+the plot without touching real data.
+
+![quickstart output](docs/quickstart.png)
+
+Each row is one molecule: grey nucleosome, pale blue linker, yellow open, red footprint, white
+where the read has no data. The top panel is the fraction of covering molecules called
+open-or-footprint, split by group. On this run it recovers 97.5% of the simulated
+accessible/protected labelling and 93.8% of the exact four-state labelling.
+
 ## Input
 
 One `(n_fiber, n_pos)` float array, `m6a`:
@@ -92,7 +113,7 @@ concordance(model, ds, rates, n_perm=4, group_key="celltype")
 
 ## The config
 
-`hier_hmm/default_config.yaml` is the whole model. Its four sections:
+`hier_hmm/default_config.yaml` is the whole model:
 
 * **`binning`** — bp per Level-1 bin (5) and per Level-2 bin (1). Level 2 runs finer because a
   25 bp footprint quantised to 5 bp carries 20% error at each edge, while a 147 bp nucleosome
@@ -134,8 +155,8 @@ prior raises it by construction — and the two excess metrics can disagree, in 
 `excess_top` (share of call mass in the 2% most recurrent positions) is the one to trust because
 it is density-invariant while coherence rises mechanically with the number of calls.
 
-On three T-cell loci × two cell types, 4 nulls (`dhs_analysis/tcell_refine_concordance.py` in
-the parent study repo):
+On three T-cell loci × two cell types, 4 nulls (reproduce the sweep on your own data with
+`examples/refine_sweep.py`):
 
 | refinement pass `k` | 0 | 1 | 2 | 3 | 4 | 5 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -143,11 +164,33 @@ the parent study repo):
 | `excess_coh` | +0.0585 | +0.0542 | +0.0538 | +0.0511 | +0.0502 | +0.0505 |
 | calls / molecule (obs / null) | 2.46 / 0.92 | 3.74 / 1.99 | 4.44 / 2.70 | 4.77 / 2.98 | 4.81 / 2.97 | 4.81 / 2.97 |
 
+![refinement sweep](docs/refine_sweep.png)
+
 With no refinement at all the footprint calls are **less** positionally concentrated than the
-null: the mixture rates alone do not produce footprints that agree across molecules. Two passes
-is the peak, and it decays slowly after. `excess_coh` is monotone decreasing and misleading here
+null (−0.13 and −0.18 at two of the three loci): the mixture rates alone do not produce
+footprints that agree across molecules. `excess_coh` is monotone decreasing and misleading here
 — at `k=0` the null makes 2.7× fewer calls than the observation, so it simply has less
 opportunity to accumulate coherence.
+
+The evidence supports **"at least 2"** much more strongly than **"exactly 2"**. Paired against
+`k=2`, averaged within locus (3 loci — the honest replicate unit, since the two cell types at a
+locus share a window):
+
+| | vs k=0 | vs k=1 | vs k=3 | vs k=4 | vs k=5 |
+| --- | --- | --- | --- | --- | --- |
+| mean gain at `k=2` | +0.0966 | +0.0241 | +0.0153 | +0.0192 | +0.0179 |
+| loci favouring `k=2` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+
+The sign is consistent everywhere, but the margin over `k>=3` is ~0.015 against a between-group
+SEM of ~0.021, and it comes from one cell type: Tconv peaks sharply at `k=2` (0.081 against
+0.052 at `k=3`) while Treg is flat from 2 to 5 (0.077 / 0.076 / 0.073 / 0.072). Treat 3 as an
+acceptable alternative and 0–1 as wrong.
+
+Two limits on how far this carries: the rates are calibrated **pooled** across the three loci, so
+they are independent in the scoring but not in the fitting; and these are the same loci the
+Level-2 settings were originally tuned on, so this is a consistency check rather than held-out
+validation. (`refine_iters` itself was never tuned on this metric before — it was inherited as
+2 — so it is not circular, just not independent.)
 
 Isolating the footprint rate (Level-1 classes held at `k=2`, footprint rate taken from pass
 `k`) shows the decay after `k=2` is **not** the footprint rate's doing:
@@ -189,17 +232,32 @@ loci, tuned there and carried over verbatim. Three that are worth knowing about:
 
 These were tuned on one dataset. Re-tune them on yours; that is what the config is for.
 
+## Examples
+
+* `examples/quickstart.py` — simulate, annotate, score against the known truth, plot. No data
+  needed.
+* `examples/refine_sweep.py` — run the calibration loop on your own windows, score the Level-2
+  calls at each pass against a permutation null, and pick `refine_iters` from the result. This is
+  how the shipped default was chosen; pass several windows so the spread between them tells you
+  whether a peak is real.
+
+```bash
+python examples/refine_sweep.py win1.npz win2.npz win3.npz -o sweep_out/
+```
+
 ## Tests
 
 ```bash
 pytest                       # or: python tests/test_hmm.py   (each file runs standalone)
 ```
 
-They cover the parts where a silent error would be invisible in the output: dwell means and
-variances against what the config asked for, Viterbi and forward-backward against brute-force
-enumeration of every state path on small chains, config validation, and end-to-end recovery of a
-path simulated from the model's own priors (the sampler walks the same chains the annotator
-builds, so a disagreement is a real bug).
+27 tests, covering the parts where a silent error would be invisible in the output: dwell means
+and variances against what the config asked for, Viterbi and forward-backward against
+brute-force enumeration of every state path on small chains, config validation, end-to-end
+recovery of a path simulated from the model's own priors (the sampler walks the same chains the
+annotator builds, so a disagreement is a real bug), and the concordance metrics — that the
+permutation preserves counts and touches only open runs, that planted footprints beat the null,
+and that footprints scattered by the prior alone score about zero.
 
 ## Limitations
 

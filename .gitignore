@@ -13,3 +13,7 @@ dist/
 *.pdf
 hier_hmm_out/
 example_out/
+refine_sweep_out/
+
+# figures that belong to the README
+!docs/*.png
