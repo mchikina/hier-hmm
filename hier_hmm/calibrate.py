@@ -74,8 +74,12 @@ def calibrate(model, dataset, verbose: bool = True) -> tuple[np.ndarray, dict]:
         pooled = state_rates(model, dataset, rates)
         num, den = pooled["num"], pooled["den"]
         new = rates.copy()
-        empty = []
+        empty, frozen = [], []
         for i, name in enumerate(order):
+            cap = classes[name].get("max_refine")
+            if cap is not None and it >= int(cap):
+                frozen.append(name)         # this class has had its passes; leave it
+                continue
             d = sum(den[s] for s in classes[name]["pool"])
             if d <= 0:
                 empty.append(name)          # nothing was decoded into this class
@@ -90,12 +94,16 @@ def calibrate(model, dataset, verbose: bool = True) -> tuple[np.ndarray, dict]:
         row["per_state"] = {s: (num[s] / den[s] if den[s] > 0 else float("nan"))
                             for s in num}
         row["empty_classes"] = empty
+        row["frozen_classes"] = frozen
         report["refine"].append(row)
         if verbose:
             print(f"  refine {it + 1}: "
-                  + "  ".join(f"{n}={r:.4f}" for n, r in zip(order, rates))
+                  + "  ".join(f"{n}={r:.4f}{'*' if n in frozen else ''}"
+                              for n, r in zip(order, rates))
                   + "   [per-state "
                   + " ".join(f"{s}={v:.4f}" for s, v in row["per_state"].items()) + "]")
+            if frozen:
+                print(f"    * held at max_refine: {frozen}")
             if empty:
                 print(f"    note: no positions decoded into {empty}; kept previous rate")
     report["final"] = dict(zip(order, rates.tolist()))

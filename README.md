@@ -77,6 +77,19 @@ res.rates           # calibrated methylation rate per emission class
 frac, cov = res.fraction("open", "footprint")   # aggregate accessibility profile
 ```
 
+Scoring the Level-2 calls against a permutation null (see *Calibration* below):
+
+```python
+from hier_hmm import HierHMM
+from hier_hmm.calibrate import calibrate
+from hier_hmm.metrics import concordance
+
+model = HierHMM(cfg)
+rates, _ = calibrate(model, ds)
+concordance(model, ds, rates, n_perm=4, group_key="celltype")
+# {'excess_coh': 0.054, 'excess_top': 0.079, 'raw_coh': 0.063, 'n_obs': 4.4, ...}
+```
+
 ## The config
 
 `hier_hmm/default_config.yaml` is the whole model. Its four sections:
@@ -106,18 +119,54 @@ turns a single fixed call into a precision/recall curve. `decode: viterbi` gives
 path instead, which discards that confidence and, in our footprint tuning, scored *worse* on how
 positionally concentrated the calls were.
 
-### Calibration
+### Calibration, and how many refinements
 
 Rates are not fitted jointly with the state path. They are initialised by a two-component
 binomial mixture over all pooled bins, then re-estimated from the positions the current
 segmentation assigns to each class — annotate, re-estimate, repeat (`refine_iters`, default 2).
 
-Note the footprint rate is the one estimate that keeps moving: each refinement re-estimates it
-from the calls the previous rates produced, which selects the most depleted ones, so it drifts
-below the truth. On synthetic data with a true footprint rate of 0.020 it lands at 0.013 after
-one refinement and 0.005 after two. This does not much change *where* footprints are called
-(the calls are already sparse and short), but do not read the calibrated footprint rate as an
-unbiased estimate of methylation inside footprints.
+This loop is self-referential — each pass re-estimates a rate from the calls the previous rates
+produced — so `refine_iters` was set by measuring the calls, not by taste. `hier_hmm.metrics`
+scores Level-2 calls as **excess over a permutation null**: Level 1 is frozen, each molecule's
+methylated positions are re-placed at random within its own open runs (count preserved), and the
+null is called with the same rates. Raw coherence is not a valid target — a shared positional
+prior raises it by construction — and the two excess metrics can disagree, in which case
+`excess_top` (share of call mass in the 2% most recurrent positions) is the one to trust because
+it is density-invariant while coherence rises mechanically with the number of calls.
+
+On three T-cell loci × two cell types, 4 nulls (`dhs_analysis/tcell_refine_concordance.py` in
+the parent study repo):
+
+| refinement pass `k` | 0 | 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `excess_top` | **−0.0174** | +0.0551 | **+0.0792** | +0.0639 | +0.0600 | +0.0613 |
+| `excess_coh` | +0.0585 | +0.0542 | +0.0538 | +0.0511 | +0.0502 | +0.0505 |
+| calls / molecule (obs / null) | 2.46 / 0.92 | 3.74 / 1.99 | 4.44 / 2.70 | 4.77 / 2.98 | 4.81 / 2.97 | 4.81 / 2.97 |
+
+With no refinement at all the footprint calls are **less** positionally concentrated than the
+null: the mixture rates alone do not produce footprints that agree across molecules. Two passes
+is the peak, and it decays slowly after. `excess_coh` is monotone decreasing and misleading here
+— at `k=0` the null makes 2.7× fewer calls than the observation, so it simply has less
+opportunity to accumulate coherence.
+
+Isolating the footprint rate (Level-1 classes held at `k=2`, footprint rate taken from pass
+`k`) shows the decay after `k=2` is **not** the footprint rate's doing:
+
+| footprint rate from pass | 0 (0.041) | 1 (0.067) | 2 (0.083) | 3 (0.087) | 4 (0.085) | 5 (0.082) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `excess_top` | +0.0611 | +0.0774 | +0.0792 | +0.0801 | +0.0794 | +0.0791 |
+
+It settles by pass 2 and is flat to ±0.001 thereafter. What keeps sliding is `accessible`
+(0.629 → 0.578) and `protected` (0.038 → 0.026), and concordance decays with them. So the
+footprint rate is the *stable* estimate here, not the runaway one, and capping it early costs a
+little (`+0.0774` at one pass against `+0.0792` at two).
+
+Each emission class nevertheless accepts `max_refine: N` to freeze it after `N` passes, which is
+the knob to reach for if you raise `refine_iters` and want the Level-1 rates pinned. Note that
+the direction of the footprint rate's drift is dataset-dependent: on the synthetic data in
+`examples/`, where footprints are sparse and cleanly separated, it drifts *down* instead
+(0.036 → 0.016 → 0.006 against a true 0.020). Measure it on your data before trusting the
+calibrated footprint rate as an estimate of anything physical.
 
 ## Where the defaults come from
 

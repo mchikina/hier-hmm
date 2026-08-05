@@ -164,6 +164,10 @@ def validate(cfg: dict) -> dict:
         clamp = spec.get("clamp_to")
         if clamp is not None and clamp not in cfg["emission"]["classes"]:
             raise ValueError(f"emission.classes.{name}.clamp_to names unknown class {clamp!r}")
+        cap = spec.get("max_refine")
+        if cap is not None and (not isinstance(cap, int) or cap < 0):
+            raise ValueError(f"emission.classes.{name}.max_refine must be a "
+                             f"non-negative integer or null, got {cap!r}")
 
     for b in ("level1_bp", "level2_bp"):
         if cfg["binning"][b] < 1 or int(cfg["binning"][b]) != cfg["binning"][b]:
