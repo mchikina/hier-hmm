@@ -79,9 +79,13 @@ def cmd_check(a) -> int:
               f"decode={level.decode}, tau={level.tau}")
         for s in level.macro_names:
             mean, sd = level.chain.dwell_moments(s)
-            cls = cfg[name]["states"][s]["emission_class"]
-            print(f"   {s:<12s} dwell {mean * bp:7.1f} +- {sd * bp:5.1f} bp "
-                  f"(config mean {cfg[name]['states'][s]['mean_bp']:g})  class={cls}")
+            spec = cfg[name]["states"][s]
+            n_sub = int((level.chain.macro == level.chain.macro_index(s)).sum())
+            want = (f"config {spec['mean_bp']:g} +- {spec['sd_bp']:g}"
+                    if spec.get("sd_bp") is not None else f"config {spec['mean_bp']:g}, k fixed")
+            print(f"   {s:<12s} length {mean * bp:7.1f} +- {sd * bp:5.1f} bp   "
+                  f"[{n_sub} substate{'' if n_sub == 1 else 's'}]  ({want})  "
+                  f"class={spec['emission_class']}")
     print("emission classes: "
           + ", ".join(f"{k} <- {v['pool']}" for k, v in cfg["emission"]["classes"].items()))
     return 0

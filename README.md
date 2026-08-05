@@ -15,27 +15,32 @@ where the read has no data. Top panel is the fraction of covering molecules call
 ## States and substates
 
 Each state is expanded into a chain of **substates**, which is what lets a state have a length
-distribution instead of a decay rate. A state with `k` substates that each exit with the same
-probability has a peaked length distribution with mean `mean_bp` and SD a little under
-`mean_bp / sqrt(k)`; an optional `min_bp` prefix of must-advance substates makes a hard floor and
-tightens it further. So each state gives you three knobs — **mean, variance (via `k`), and
-minimum** — and a nucleosome comes out at 129 ± 21 bp, never shorter than 60, rather than "most
-likely 1 bp long".
+distribution instead of a decay rate. You give the distribution in bp — **mean, SD, and an
+optional hard minimum** — and the number of substates is solved for. A nucleosome comes out at
+129 ± 21 bp, never shorter than 60, rather than "most likely 1 bp long".
 
 **Level 1**, 5 bp bins:
 
-| state | mean | substates `k` | minimum | resulting SD | emission class |
+| state | mean | SD | minimum | substates | emission class |
 | --- | --- | --- | --- | --- | --- |
-| open | 212 bp | 4 | — | 101 bp | accessible |
-| linker | 49 bp | 3 | — | 24 bp | accessible |
-| nucleosome | 129 bp | 6 | 60 bp | 21 bp | protected |
+| open | 212 bp | 101 bp | — | 4 | accessible |
+| linker | 49 bp | 23.6 bp | — | 3 | accessible |
+| nucleosome | 129 bp | 21.2 bp | 60 bp | 18 | protected |
 
 **Level 2**, 1 bp bins, run inside open runs (trimmed 15 bp at each end, minimum run 60 bp):
 
-| state | mean | substates `k` | minimum | resulting SD | emission class |
+| state | mean | SD | minimum | substates | emission class |
 | --- | --- | --- | --- | --- | --- |
-| open | 50 bp | 1 | — | 50 bp | open_only |
-| footprint | 15 bp | 3 | 8 bp | 3 bp | footprint |
+| open | 50 bp | flat hazard | — | 1 | open_only |
+| footprint | 15 bp | 3.1 bp | 8 bp | 11 | footprint |
+
+The substate counts are outputs, not inputs — they are what the bin size happens to need. Change
+`binning.level1_bp` from 5 to 10 and the nucleosome still comes out 129 ± 22 bp, on 10 substates
+instead of 18. (A state can also be specified by pinning its substate count with `k` instead, as
+the Level-2 open state does to get a deliberately flat hazard. That spelling is bin-dependent:
+the SD it produces shrinks as bins get coarser.) What a coarse bin really costs is sharpness —
+substates 10 bp wide cannot make a 3 bp SD — and you get an error saying so rather than a
+quietly widened state.
 
 Transitions between states are a grammar, and its zeros are hard:
 
@@ -46,8 +51,8 @@ Transitions between states are a grammar, and its zeros are hard:
 | nucleosome | linker (0.72), open (0.28) |
 
 Open and linker share one emission rate — they are told apart by their lengths and by the
-grammar, not by their signal. `hier-hmm check` prints the length distributions any config
-actually implies; note that changing a bin size changes the variances, since `k` is fixed.
+grammar, not by their signal. `hier-hmm check` prints the length distribution any config
+actually implies, at whatever bin size it is set to.
 
 ## Emission
 
@@ -143,7 +148,7 @@ itself settles by pass 2; what keeps drifting afterwards is `accessible` and `pr
 pytest                # or: python tests/test_hmm.py  — each file also runs standalone
 ```
 
-27 tests: length distributions against what the config asked for, Viterbi and forward-backward
+34 tests: length distributions against what the config asked for, Viterbi and forward-backward
 against brute-force enumeration of every path on small chains, config validation, end-to-end
 recovery of a simulated path, and the concordance metrics.
 

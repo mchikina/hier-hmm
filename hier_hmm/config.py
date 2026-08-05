@@ -108,10 +108,20 @@ def validate(cfg: dict) -> dict:
         if not states:
             raise ValueError(f"{level}.states is empty")
         for name, spec in states.items():
-            for field in ("mean_bp", "k", "emission_class"):
+            for field in ("mean_bp", "emission_class"):
                 if field not in spec:
                     raise ValueError(f"{level}.states.{name} is missing {field!r}")
-            if spec["k"] < 1:
+            has_sd = spec.get("sd_bp") is not None
+            has_k = spec.get("k") is not None
+            if has_sd == has_k:
+                raise ValueError(
+                    f"{level}.states.{name}: give exactly one of sd_bp (preferred — the "
+                    f"substate count is then solved for at the current bin size, so the "
+                    f"config means the same thing at any bin) or k (pins the substate "
+                    f"count, and the SD it gives shrinks as bins get coarser)")
+            if has_sd and spec["sd_bp"] <= 0:
+                raise ValueError(f"{level}.states.{name}.sd_bp must be > 0")
+            if has_k and spec["k"] < 1:
                 raise ValueError(f"{level}.states.{name}.k must be >= 1")
             if spec.get("min_bp", 0.0) >= spec["mean_bp"]:
                 raise ValueError(

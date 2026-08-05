@@ -20,11 +20,12 @@
 # Level 1 (open / linker / nucleosome) runs on bins of `level1_bp`; Level 2
 # (footprints, inside open runs only) runs on bins of `level2_bp`.
 #
-# A bin-size change is a MODEL change, not just a resolution change. Each state
-# is an Erlang chain of `k` stages, and `k` is fixed while the per-stage advance
-# probability scales with the bin size, so the dwell MEAN is invariant but the
-# dwell VARIANCE is not (a nucleosome's dwell SD is ~27 bp at 1 bp bins, ~21 bp
-# at 5 bp bins, ~10 bp at 10 bp bins). Re-tune `k` if you move these.
+# Changing a bin size is safe as long as every state gives `sd_bp` rather than
+# `k` (see below): the mean, SD and minimum are then all held in bp and the
+# substate count is solved for at whichever bin you run. What a coarser bin
+# costs is how SHARP a state is allowed to be — a chain whose substates are
+# 10 bp wide cannot have a 3 bp SD — and the model says so with an error rather
+# than quietly widening the state. `hier-hmm check` prints what you got.
 binning:
   level1_bp: 5      # a 147 bp nucleosome does not care about 5 bp quantisation
   level2_bp: 1      # a 25 bp footprint does: at 5 bp bins each edge carries 20%
@@ -33,11 +34,20 @@ binning:
 # -----------------------------------------------------------------------------
 # Level 1 — open / linker / nucleosome
 # -----------------------------------------------------------------------------
-# Each state is a phase-type (Erlang) duration: `k` stages each left with the
-# same probability, giving a peaked, non-geometric dwell distribution with
-# mean `mean_bp` and SD ~ mean_bp / sqrt(k). `min_bp`, if given, is a hard
-# advance-only prefix: the state cannot be shorter than that, and the Erlang
-# tail then adds a further mean of (mean_bp - min_bp).
+# Each state is expanded into a chain of SUBSTATES, which is what gives it a
+# length distribution instead of a decay rate. Describe that distribution in bp:
+#
+#   mean_bp   mean length
+#   sd_bp     SD of the length
+#   min_bp    hard floor (a prefix of must-advance substates); the rest of the
+#             length is the distribution above it, so the mean still comes out
+#             at mean_bp
+#
+# The substate count is then solved for at the current bin size, so these three
+# numbers mean the same thing at any bin. You may instead give `k` (the substate
+# count) directly, which is the old spelling: it pins the chain rather than the
+# distribution, and the SD then shrinks as bins get coarser. Give one or the
+# other, never both.
 #
 # `emission_class` names the methylation rate this state emits with (see the
 # `emission` section). open and linker SHARE the `accessible` class by default:
@@ -51,16 +61,16 @@ level1:
   states:
     open:
       mean_bp: 212.0
-      k: 4
+      sd_bp: 101.0
       emission_class: accessible
     linker:
       mean_bp: 49.0
-      k: 3
+      sd_bp: 23.6
       emission_class: accessible     # set to `linker` to untie (not recommended)
     nucleosome:
       mean_bp: 129.0
-      k: 6
-      min_bp: 60.0                   # hard floor on nucleosome dwell
+      sd_bp: 21.2
+      min_bp: 60.0                   # hard floor on nucleosome length
       emission_class: protected
 
   # Grammar: allowed transitions out of each state and their weights (each row
@@ -100,13 +110,16 @@ level1:
 level2:
   states:
     open:
-      mean_bp: 50.0        # mean open bp before a footprint starts (1 / hazard)
-      k: 1
+      mean_bp: 50.0        # mean open bp before a footprint starts
+      k: 1                 # ONE substate on purpose: a flat hazard, i.e. a
+                           # footprint is equally likely to start anywhere in an
+                           # open run. That is a statement about the process, not
+                           # a length to be tuned, so it is spelled with k.
       emission_class: open_only
     footprint:
       mean_bp: 15.0
-      k: 3
-      min_bp: 8.0          # hard floor on the hidden footprint dwell
+      sd_bp: 3.1
+      min_bp: 8.0          # hard floor on the hidden footprint length
       emission_class: footprint
 
   transitions:
