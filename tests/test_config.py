@@ -42,6 +42,15 @@ def test_override_merges_without_clobbering_siblings():
     assert cfg["level1"]["states"]["open"]["mean_bp"] == 212.0     # untouched
 
 
+def test_shipped_tuned_config_loads():
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = load_config(os.path.join(here, "examples", "treg_atac_tuned.yaml"))
+    assert cfg["emission"]["calibration"]["mixture_init"] is False
+    assert cfg["emission"]["calibration"]["refine_iters"] == 0
+    assert cfg["emission"]["classes"]["accessible"]["init"] == 0.35
+    assert cfg["level1"]["tau"] == 0.7
+
+
 def test_set_overrides():
     cfg = load_config(None, ["level1.tau=0.7", "binning.level1_bp=10",
                              "level1.states.nucleosome.mean_bp=140"])

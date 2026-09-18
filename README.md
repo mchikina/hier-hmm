@@ -128,6 +128,22 @@ Both levels decode by forward-backward posterior: a position is called by the th
 the argmax of the rest. `tau` is the operating point — sweep it for a recall curve.
 `decode: viterbi` gives the single best path instead.
 
+### Fixed rates tuned against bulk accessibility
+
+Calibration is optional: give a number as a class's `init` and set `mixture_init: false`,
+`refine_iters: 0`, and that number is the rate. `examples/treg_atac_tuned.yaml` does this
+with rates and a `tau` tuned on mouse Treg Fiber-seq to maximise the Pearson r between the
+cross-fiber mean-open track and log1p(bulk ATAC-seq Tn5 cut sites) over 2 kb ATAC-peak
+windows (`accessible` 0.35, `protected` 0.02, `open_only` 0.7, `footprint` 0.09, `tau` 0.7):
+pooled r 0.727 on 8000 held-out windows against 0.700 for the defaults. The lower
+`accessible` rate and higher `tau` call fewer, longer open runs. Rates depend on the m6A
+caller and its threshold, so re-tune for another dataset; the objective needs only a
+mean-open track and a bulk accessibility track.
+
+```bash
+hier-hmm run data.npz -c examples/treg_atac_tuned.yaml
+```
+
 ### Why calibration runs twice
 
 `hier_hmm.metrics` scores Level-2 calls as excess over a permutation null: Level 1 frozen, each
@@ -161,7 +177,7 @@ Run `examples/refine_sweep.py` on your own windows to redo all of this.
 pytest                # or: python tests/test_hmm.py  — each file also runs standalone
 ```
 
-36 tests: length distributions against what the config asked for, Viterbi and forward-backward
+37 tests: length distributions against what the config asked for, Viterbi and forward-backward
 against brute-force enumeration of every path on small chains, config validation, end-to-end
 recovery of a simulated path, and the concordance metrics.
 

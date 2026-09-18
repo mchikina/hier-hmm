@@ -1,0 +1,22 @@
+# Fixed emission rates and operating point tuned on mouse Treg Fiber-seq against bulk
+# ATAC-seq: the overrides maximising Pearson r between the cross-fiber mean-open track
+# and log1p(ATAC Tn5 cut sites) over 2 kb ATAC-peak windows. Tuned on 2000 windows,
+# validated on 8000 held-out windows: pooled r 0.727 against 0.700 for the defaults.
+#
+#   hier-hmm run data.npz -c examples/treg_atac_tuned.yaml
+#
+# Calibration is switched off (mixture_init false, refine_iters 0), so the `init`
+# numbers are used as the rates. Rates depend on the m6A caller and its threshold —
+# re-tune for a different dataset (a mean-open track and a bulk accessibility track
+# are all the tuning needs).
+emission:
+  classes:
+    accessible: {init: 0.35}
+    protected:  {init: 0.02}
+    open_only:  {init: 0.7}
+    footprint:  {init: 0.09}
+  calibration:
+    mixture_init: false
+    refine_iters: 0
+level1:
+  tau: 0.7
